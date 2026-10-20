@@ -30,6 +30,8 @@ uv run pytest -q
 uv run python -m app.ask "LoRAとは何ですか？"
 ```
 
+質問に答えたあとも続けて入力でき、同じ会話の履歴を引き継ぎます。`exit` または `quit` で終了します。質問を省略すると講座に固有の既定質問から始まります。
+
 詳しい手順は [lectures/01/problem.md](lectures/01/problem.md) を見てください。
 
 ## 構成
