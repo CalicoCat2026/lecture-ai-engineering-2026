@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart, UserPromptPart
@@ -54,8 +54,19 @@ Verdict = Literal["pass", "fail", "unsure"]
 class CriterionVerdict(BaseModel):
     """1 つの基準に対する判定。reason を先に書かせてから verdict を決めさせる（理由→判定の順）。"""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     reason: str = Field(description="判定の理由。日本語で 1〜2 文")
     verdict: Verdict = Field(description="pass / fail / unsure のどれか")
+
+    def model_dump(self, **kwargs):
+        """JSON 形式を厳密に reason → verdict の順に固定する。"""
+        data = super().model_dump(**kwargs)
+        return {"reason": data["reason"], "verdict": data["verdict"]}
+
+    def ordered(self) -> dict[str, str]:
+        """判定結果の JSON 形式を reason → verdict の順に固定する。"""
+        return self.model_dump()
 
 
 class JudgeResult(BaseModel):
@@ -117,8 +128,11 @@ def judge_prompt(case: dict) -> str:
 def build_judge(model, rubric: str) -> Agent:
     instructions = rubric + (
         "\n\n# 出力の形式\n"
-        "4 つの基準（grounding, scope, hint, clarity）それぞれについて、reason（理由）を先に書き、"
+        "4 つの基準（grounding, scope, hint, clarity）それぞれについて、"
+        "最優先ルールとして、JSON のキー順は必ず reason を先に、verdict を後にしてください。"
+        "verdict を先に書いてはいけません。reason を先に書いてから、"
         "そのあとで verdict を pass / fail / unsure のどれかにしてください。"
+        "出力は厳密に {'reason': '理由', 'verdict': 'pass'} の順にしてください。"
     )
     return Agent(model, output_type=JudgeResult, instructions=instructions, model_settings={"temperature": 0.0})
 
@@ -195,7 +209,7 @@ def judge_cases(agent: Agent, cases: list[dict], wait: float = 0.0) -> dict[str,
     for case in cases:
         result = agent.run_sync(judge_prompt(case))
         out: JudgeResult = result.output
-        verdicts[case["id"]] = {key: getattr(out, key).model_dump() for key, _ in LLM_CRITERIA}
+        verdicts[case["id"]] = {key: getattr(out, key).ordered() for key, _ in LLM_CRITERIA}
         verdicts[case["id"]]["lecture_mark"] = {
             "reason": "末尾（最後の行）に「第N回」があるかをコードで判定",
             "verdict": check_lecture_mark(case["answer"]),
@@ -280,7 +294,7 @@ def print_summary(summary: dict, labeler: str = "自分のラベル") -> None:
         print(f"  #{r['id']} {r['name']}: {r['reason']}")
     print(f"\n不一致 {len(summary['mismatches'])} 件")
     for m in summary["mismatches"]:
-        print(f"  #{m['id']} {_pad(m['name'], 12)} {m['kind']}（LLM={m['judge']} 自分={m['human']}）  理由: {m['reason']}")
+        print(f"  #{m['id']} {_pad(m['name'], 12)} 理由: {m['reason']}  判定: {m['kind']}（LLM={m['judge']} 自分={m['human']}）")
 
 
 def compare_labels(a: dict[str, dict], b: dict[str, dict], name_a: str, name_b: str) -> None:

@@ -9,12 +9,14 @@ from app.judge import (
     ALL_CRITERIA,
     DEFAULT_CASES,
     DEFAULT_RUBRIC,
+    CriterionVerdict,
     build_judge,
     build_test_model,
     check_lecture_mark,
     judge_cases,
     load_labels,
     overall,
+    print_summary,
     read_jsonl,
     summarize,
 )
@@ -46,6 +48,43 @@ def test_cases_and_rubric_are_consistent():
         assert f"{name}（{key}）" in rubric
     labels = load_labels(INSTRUCTOR_LABELS)
     assert set(labels) == {c["id"] for c in cases}
+
+
+def test_reason_is_serialized_before_verdict():
+    verdict = CriterionVerdict(reason="説明文", verdict="pass")
+    assert list(verdict.ordered().keys()) == ["reason", "verdict"]
+    assert list(verdict.model_dump().keys()) == ["reason", "verdict"]
+
+
+def test_print_summary_shows_reason_before_verdict():
+    summary = {
+        "n": 1,
+        "per_criterion": {
+            key: {"name": name, "agree": 0, "compared": 0, "total": 1}
+            for key, name in ALL_CRITERIA
+        },
+        "overall": {"agree": 0, "compared": 0},
+        "coverage": {"covered": 0, "total": 1},
+        "review": [],
+        "mismatches": [{
+            "id": "01",
+            "criterion": "grounding",
+            "name": "根拠",
+            "kind": "過検出",
+            "judge": "fail",
+            "human": "pass",
+            "reason": "説明が不十分です。",
+        }],
+    }
+    import io
+    from contextlib import redirect_stdout
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+        print_summary(summary)
+    text = out.getvalue()
+    assert "理由: 説明が不十分です。  判定: 過検出（LLM=fail 自分=pass）" in text
+    assert text.index("理由:") < text.index("判定:")
 
 
 def test_judge_pipeline_with_fake_model():
